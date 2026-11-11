@@ -275,7 +275,7 @@ const SITE_COUNTS = [['10', '10 sites'], ['25', '25 sites'], ['50', '50 sites'],
 
 function editor() {
   const d = state.detail, p = d.profile, isNew = !d.id, readOnly = state.user.role === 'viewer';
-  const err = el('div', { class: 'error', role: 'alert' }, state.errors.map(e => el('div', {}, e)));
+  const err = el('div', { id: 'client-save-errors', class: 'error', role: 'alert' }, state.errors.map(e => el('div', {}, e)));
   return el('section', {},
     el('div', { class: 'page-heading' }, el('span', { class: 'eyebrow' }, isNew ? 'Client intake' : 'Client workspace'), el('h2', {}, isNew ? 'New client' : d.displayName || 'Client profile'), el('p', { class: 'muted' }, 'Manage profile details, permissions, and applications.')),
     d.missing?.length ? el('div', { class: 'warn' }, 'Still needed: ' + d.missing.join(', ')) : null,
@@ -327,19 +327,42 @@ function collect() {
   return profile;
 }
 
-async function save() {
+async function save(event) {
+  const button = event.currentTarget;
+  const errorBox = document.getElementById('client-save-errors');
+  const detail = state.detail;
+  if (button.disabled) return;
+  button.disabled = true;
   state.errors = [];
+  errorBox.replaceChildren();
+  let id = detail.id;
   try {
     const profile = collect(), displayName = val('displayName');
-    if (!state.detail.id) {
+    if (!id) {
       const consents = document.getElementById('consent')?.checked ? ['use_profile_for_applications'] : [];
-      const r = await api('/api/clients', 'POST', { displayName, profile, consents });
-      await refresh(); await openClient(r.id);
+      const result = await api('/api/clients', 'POST', { displayName, profile, consents });
+      id = result.id;
+      if (state.detail === detail) { detail.id = id; state.selected = id; }
     } else {
-      await api('/api/clients/' + state.detail.id, 'PUT', { displayName, profile });
-      await refresh(); await openClient(state.detail.id);
+      await api('/api/clients/' + id, 'PUT', { displayName, profile });
     }
-  } catch (e) { state.errors = e.data?.errors ?? [e.message]; render(); }
+  } catch (e) {
+    if (errorBox.isConnected) {
+      const messages = e.data?.errors ?? [e.message];
+      errorBox.replaceChildren(...messages.map(message => el('div', {}, message)));
+    }
+    button.disabled = false;
+    return;
+  }
+
+  try {
+    await refresh();
+    if (state.detail === detail && errorBox.isConnected) await openClient(id);
+  } catch {
+    if (errorBox.isConnected) errorBox.textContent = 'Client saved. Refresh the page to reload the client list.';
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function newClient() { state.tab = 'clients'; state.selected = null; state.errors = []; state.detail = { id: null, displayName: '', profile: {}, consents: [], missing: [] }; render(); }
