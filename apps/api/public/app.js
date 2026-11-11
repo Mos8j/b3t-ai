@@ -538,20 +538,47 @@ function clientSitesPanel(resultsOnly = false) {
     if (opts.resumeRunId && !confirm('Resume untouched sites only? Completed attempts and sites awaiting verification will be skipped.')) return;
     c.readiness = null;
     const par = Math.min(12, Math.max(1, parseInt(val('send-par'), 10) || 10));
-    c.stop = false; c.sendingAll = true; c.notice = ''; const all = []; const tried = []; let remaining = 0; let batchMessage = '';
+    c.stop = false; c.sendingAll = true; c.notice = '';
+    const all = [];
+    let remaining = 0;
+    let consecutiveFailures = 0;
     try {
       const saved = opts.resumeRunId ? { runId: opts.resumeRunId } : await api('/api/clients/' + id + '/batches', 'POST', { restoredOnly });
+      if (!saved.runId) throw new Error('Could not confirm the batch was created. Check Saved sending batches before starting again.');
+      remaining = saved.remaining || 0;
       while (!c.stop) {
-        c.busy = `Sending, several sites at a time... ${all.length} finished so far. Press Stop to pause after the sites in progress.`; render();
-        const r = await api('/api/clients/' + id + '/batches/' + saved.runId + '/next', 'POST', { limit: par });   // never retried automatically: a retry could send the same sites twice
-        all.push(...r.results); tried.push(...r.results.map(x => x.siteId)); remaining = r.remaining; if (r.message) batchMessage = r.message;
-        showResults(all, batchMessage ? ' ' + batchMessage : remaining ? ` ${remaining} approved sites are still waiting.` : '');
-        await loadClientSites(); render();
-        if (!r.results.length || remaining === 0) break;
+        c.busy = consecutiveFailures
+          ? 'Waiting for the connection or current group to finish. This batch will continue automatically.'
+          : `Sending… ${all.length} results received. Press Stop to pause after the current group.`;
+        render();
+        let result;
+        try {
+          // The server records each claim before sending. Calling next again cannot reclaim those sites.
+          result = await api('/api/clients/' + id + '/batches/' + saved.runId + '/next', 'POST', { limit: par });
+          if (!Array.isArray(result.results) || !Number.isInteger(result.remaining)) throw new Error('Unexpected response from the server');
+        } catch (e) {
+          const busy = e.status === 409 && /still processing/.test(e.message);
+          const temporary = !e.status || busy || [408, 429, 500, 502, 503, 504].includes(e.status);
+          if (!temporary) throw e;
+          if (++consecutiveFailures > 12) throw new Error('Could not reconnect after several attempts. Resume remaining sites from Saved sending batches when the connection is back.');
+          c.busy = 'Connection interrupted. B3T Ai will try again automatically. Press Stop to pause.';
+          render();
+          await new Promise(resolve => setTimeout(resolve, Math.min(20000, consecutiveFailures * 4000)));
+          continue;
+        }
+        consecutiveFailures = 0;
+        all.push(...result.results);
+        remaining = result.remaining;
+        showResults(all, remaining ? ` ${remaining} untouched sites are still waiting.` : '');
+        if (!remaining || !result.results.length) break;
       }
     } catch (e) { c.notice = e.message; }
-    showResults(all, batchMessage ? ' ' + batchMessage : remaining ? ` ${remaining} approved sites are still waiting.` : '');
-    c.busy = ''; c.sendingAll = false; await reload();
+    showResults(all, remaining ? ` ${remaining} untouched sites were waiting at the last update.` : '');
+    c.busy = ''; c.sendingAll = false;
+    if (state.cs === c) {
+      try { await reload(); }
+      catch { c.notice ||= 'Could not refresh the saved batch. Refresh the page to see its latest progress.'; render(); }
+    }
   };
   const prepare = async s => {
     c.notice = ''; c.prep = { site: s.name, loading: true }; render();
