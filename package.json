@@ -1,0 +1,16 @@
+{
+  "name": "ucaas",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "keygen": "node scripts/gen-keys.mjs",
+    "dev": "npm run dev -w @ucaas/api",
+    "db:up": "docker compose up -d postgres redis",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run migrate -w @ucaas/db",
+    "db:status": "npm run status -w @ucaas/db",
+    "build": "npm run build --workspaces --if-present"
+  }
+}
