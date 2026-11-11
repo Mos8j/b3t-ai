@@ -23,9 +23,9 @@ const badge = (text, tone = '') => el('span', { class: 'badge ' + tone }, text);
 const metrics = items => el('div', { class: 'metrics' }, items.map(([label, value]) =>
   el('div', { class: 'metric' }, el('strong', {}, value ?? 0), el('span', {}, label))));
 
-async function api(path, method = 'GET', body) {
+async function api(path, method = 'GET', body, signal) {
   const res = await fetch(path, {
-    method, credentials: 'same-origin',
+    method, signal, credentials: 'same-origin',
     headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -554,7 +554,7 @@ function clientSitesPanel(resultsOnly = false) {
         let result;
         try {
           // The server records each claim before sending. Calling next again cannot reclaim those sites.
-          result = await api('/api/clients/' + id + '/batches/' + saved.runId + '/next', 'POST', { limit: par });
+          result = await api('/api/clients/' + id + '/batches/' + saved.runId + '/next', 'POST', { limit: par }, AbortSignal.timeout(165000));
           if (!Array.isArray(result.results) || !Number.isInteger(result.remaining)) throw new Error('Unexpected response from the server');
         } catch (e) {
           const busy = e.status === 409 && /still processing/.test(e.message);
